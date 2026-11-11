@@ -11,3 +11,9 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
       - run: npm run check
+      - name: Проверка автора PR
+        if: github.event_name == 'pull_request'
+        run: |
+          AUTHOR=$(node -p "require('./mapp/mapp.manifest.json').author")
+          echo "author в манифесте: $AUTHOR, автор PR: ${{ github.event.pull_request.user.login }}"
+          [ "$AUTHOR" = "${{ github.event.pull_request.user.login }}" ] || [ "${{ github.event.pull_request.user.login }}" = "HeadMad" ] || { echo "автор манифеста должен совпадать с автором PR"; exit 1; }
