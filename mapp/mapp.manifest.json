@@ -1,8 +1,8 @@
 {
-  "id": "author.app-name",
+  "id": "your-github-login.app-name",
   "name": "app-name",
   "version": "1.0.0",
-  "author": "github-username",
+  "author": "your-github-login",
   "description": "Краткое описание приложения",
   "icon": "public/assets/icon.svg",
   "permissions": [],
