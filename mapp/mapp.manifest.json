@@ -1,0 +1,16 @@
+{
+  "id": "author.app-name",
+  "name": "app-name",
+  "version": "1.0.0",
+  "author": "github-username",
+  "description": "Краткое описание приложения",
+  "icon": "public/assets/icon.svg",
+  "permissions": [],
+  "dependencies": [],
+  "routers": {
+    "app": "public",
+    "client": "public",
+    "web": "public",
+    "preview": "public"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "miniapp-template",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Шаблон мини-приложения MiniAppHub (чистый HTML5 + Vanilla JS)",
+  "scripts": {
+    "check": "node scripts/check-manifest.mjs"
+  },
+  "license": "MIT"
+}
