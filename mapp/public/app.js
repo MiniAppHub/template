@@ -1,9 +1,15 @@
-import { MiniApp } from './api/sdk.js';
+import { mapp, Mapp } from './api/sdk.js';
 
 const out = document.getElementById('out');
-const app = new MiniApp();
 
 document.getElementById('btn').addEventListener('click', async () => {
-  const res = await app.call('system.info');
-  out.textContent = JSON.stringify(res, null, 2);
+  if (!Mapp.inShell) {
+    out.textContent = 'Приложение открыто вне оболочки — мост недоступен.';
+    return;
+  }
+  const [ver, settings] = await Promise.all([
+    mapp.shell('getVersion'),
+    mapp.shell('getSettings'),
+  ]);
+  out.textContent = JSON.stringify({ ver, settings }, null, 2);
 });
