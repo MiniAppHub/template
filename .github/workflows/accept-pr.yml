@@ -1,0 +1,158 @@
+# Приём Pull Request в шаблон и в репозитории мини-приложений.
+#
+# Шаблон: PR в main не принимается. PR в любую другую ветку превращается в репозиторий
+# app-<author>-<name> (если его нет) или обновляет main этого репозитория.
+# Репозиторий мини-приложения: принимается только PR в main, автор обязан совпасть с автором манифеста.
+#
+# В любом случае пользовательские workflow удаляются и ставится платформенный app-publish.yml,
+# чтобы автор мини-приложения не получал прав больше, чем даёт публикация.
+name: accept-pr
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  accept:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
+      ORG: MiniAppHub
+      IS_TEMPLATE: ${{ github.repository == 'MiniAppHub/template' }}
+      PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Проверить ветку
+        id: check
+        run: |
+          set -eu
+          fail() {
+            echo "reason=$1" >> "$GITHUB_OUTPUT"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$2"
+            echo "ОТКАЗ: $1"
+            exit 0
+          }
+          if [ "$IS_TEMPLATE" = "true" ]; then
+            # шаблон: PR в main запрещён
+            if [ "$BASE_REF" = "main" ]; then
+              fail "template-main" "PR в ветку \`main\` шаблона не принимается. Создайте ветку со своим названием — из неё будет создан ваш репозиторий мини-приложения."
+            fi
+          else
+            # репозиторий мини-приложения: только main
+            if [ "$BASE_REF" != "main" ]; then
+              fail "app-not-main" "В репозиторий мини-приложения изменения принимаются только в ветку \`main\`."
+            fi
+          fi
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.ok == 'true'
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ env.HEAD_SHA }}
+          path: src
+          fetch-depth: 0
+
+      - name: Получить платформенный workflow
+        if: steps.check.outputs.ok == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: MiniAppHub/template
+          ref: main
+          path: platform
+          sparse-checkout: .github/workflows/app-publish.yml
+
+      - name: Проверить манифест и автора
+        if: steps.check.outputs.ok == 'true'
+        id: man
+        run: |
+          set -eu
+          M=src/mapp/mapp.manifest.json
+          if [ ! -f "$M" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "В PR нет \`mapp/mapp.manifest.json\`."
+            echo "ok=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          node -e "
+            const fs = require('fs');
+            const m = JSON.parse(fs.readFileSync('$M', 'utf8'));
+            for (const k of ['id','name','version','author','description']) {
+              if (!m[k]) throw new Error('в манифесте нет поля ' + k);
+            }
+            if (!/^[a-z0-9-]+\.[a-z0-9-]+\$/i.test(m.id)) throw new Error('id должен быть author.app-name');
+            if (!m.id.toLowerCase().startsWith(m.author.toLowerCase() + '.')) throw new Error('префикс id не совпадает с author');
+            if (!/^\d+\.\d+\.\d+\$/.test(m.version)) throw new Error('version должен быть X.Y.Z');
+            const web = String((m.routers && m.routers.web) || 'public').replace(/^\.?\//,'').replace(/\/+\$/,'');
+            if (!fs.existsSync('src/mapp/' + web + '/index.html')) throw new Error('нет mapp/' + web + '/index.html');
+            for (const [k,v] of Object.entries({id:m.id,name:m.name,version:m.version,author:m.author,web}))
+              fs.appendFileSync(process.env.GITHUB_OUTPUT, k + '=' + v + '\n');
+          " || {
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Манифест не прошёл проверку. Смотрите лог шага «Проверить манифест и автора»."
+            echo "ok=false" >> "$GITHUB_OUTPUT"; exit 0
+          }
+
+          # автор PR должен совпадать с автором манифеста
+          if ! node -e "
+            const a = '${{ env.PR_AUTHOR }}'.toLowerCase();
+            const b = '${{ steps.man.outputs.author }}'.toLowerCase();
+            process.exit(a === b ? 0 : 1);
+          "; then
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Автор PR (\`${{ env.PR_AUTHOR }}\`) не совпадает с автором в манифесте (\`${{ steps.man.outputs.author }}\`). PR не принимается."
+            echo "ok=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      - name: Определить репозиторий
+        if: steps.check.outputs.ok == 'true' && steps.man.outputs.ok == 'true'
+        id: repo
+        run: |
+          set -eu
+          SLUG=$(echo "${{ steps.man.outputs.id }}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]\+/-/g; s/^-//; s/-$//')
+          NAME="app-$SLUG"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          if gh repo view "$ORG/$NAME" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "репозиторий $ORG/$NAME уже есть"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "репозиторий $ORG/$NAME будет создан"
+          fi
+
+      - name: Создать репозиторий
+        if: steps.check.outputs.ok == 'true' && steps.man.outputs.ok == 'true' && steps.repo.outputs.exists == 'false'
+        run: |
+          set -eu
+          gh repo create "$ORG/${{ steps.repo.outputs.name }}" --public \
+            --description "${{ steps.man.outputs.name }} — мини-приложение MiniAppHub (автор ${{ steps.man.outputs.author }})"
+
+      - name: Перенести содержимое PR в main
+        if: steps.check.outputs.ok == 'true' && steps.man.outputs.ok == 'true'
+        run: |
+          set -eu
+          NAME="${{ steps.repo.outputs.name }}"
+          cd src
+
+          # пользовательские workflow не переносим: у автора не должно быть лишних прав
+          rm -rf .github/workflows
+          mkdir -p .github/workflows
+          cp ../platform/.github/workflows/app-publish.yml .github/workflows/app-publish.yml
+          test -s .github/workflows/app-publish.yml || { echo "::error::платформенный workflow не получен"; exit 1; }
+
+          git config user.name "${{ env.PR_AUTHOR }}"
+          git config user.email "${{ steps.man.outputs.author }}@users.noreply.github.com"
+          git checkout -q -B main
+          git add -A
+          git commit -qm "${{ steps.man.outputs.name }} ${{ steps.man.outputs.version }} (PR #${{ env.PR_NUMBER }})" || echo "нечего коммитить"
+          git push -f "https://x-access-token:$GH_TOKEN@github.com/$ORG/$NAME.git" main
+
+      - name: Итог
+        if: steps.check.outputs.ok == 'true' && steps.man.outputs.ok == 'true'
+        run: |
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Принято: \`$ORG/${{ steps.repo.outputs.name }}\`, версия ${{ steps.man.outputs.version }}. Сборка и публикация запущены в этом репозитории."
