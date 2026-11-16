@@ -88,8 +88,10 @@ jobs:
         id: cls
         run: |
           set -eu
-          NEW="${{ steps.man.outputs.version }}"
-          PREV=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName 2>/dev/null | sed 's/^v//' || true)
+          # «latest» — самый свежий релиз с числовым тегом vX.Y.Z;
+          # служебные теги (старый плавающий latest и прочие) в сравнении не участвуют
+          PREV=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName -q '.[].tagName' 2>/dev/null \
+                 | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 | sed 's/^v//' || true)
           echo "последний релиз: ${PREV:-нет}, собираем: $NEW"
           echo "prev=$PREV" >> "$GITHUB_OUTPUT"
           if [ -n "$PREV" ] && [ "$NEW" = "$PREV" ]; then
