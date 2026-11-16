@@ -23,6 +23,7 @@ concurrency:
 
 jobs:
   publish:
+    if: github.repository != 'MiniAppHub/template'
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -148,8 +149,9 @@ jobs:
           WEB="https://${OWNER_LC}.github.io/${NAME}/"
           LATEST_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/latest/MiniAppHub-app-$V.zip"
           MAJOR_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/v$MAJOR.0.0/MiniAppHub-app-$V.zip"
+          MAJOR_V="$MAJOR.0.0"
 
-          export WEB LATEST_URL MAJOR_URL MAJOR="$MAJOR"
+          export WEB LATEST_URL MAJOR_URL MAJOR_V="$MAJOR_V"
           export V
           PAYLOAD=$(node -e '
             const fs = require("fs");
@@ -167,7 +169,7 @@ jobs:
               repo: "https://github.com/" + e.GITHUB_REPOSITORY,
               version: {
                 latest: { v: e.V, url: e.LATEST_URL },
-                major: { v: e.MAJOR, url: e.MAJOR_URL }
+                major: { v: e.MAJOR_V, url: e.MAJOR_URL }
               }
             }));
           ')
